@@ -5,9 +5,15 @@ export default auth((req) => {
   const { nextUrl, auth: session } = req
 
   const isLoggedIn = !!session?.user
-  const isDashboard = nextUrl.pathname.startsWith('/dashboard')
+  const isProtected =
+    nextUrl.pathname.startsWith('/dashboard') ||
+    nextUrl.pathname.startsWith('/affiliates') ||
+    nextUrl.pathname.startsWith('/conversions') ||
+    nextUrl.pathname.startsWith('/payouts') ||
+    nextUrl.pathname.startsWith('/settings') ||
+    nextUrl.pathname.startsWith('/billing')
 
-  if (isDashboard && !isLoggedIn) {
+  if (isProtected && !isLoggedIn) {
     const loginUrl = new URL('/login', nextUrl.origin)
     loginUrl.searchParams.set('callbackUrl', nextUrl.pathname)
     return NextResponse.redirect(loginUrl)
@@ -24,6 +30,11 @@ export default auth((req) => {
 export const config = {
   matcher: [
     '/dashboard/:path*',
+    '/affiliates/:path*',
+    '/conversions/:path*',
+    '/payouts/:path*',
+    '/settings/:path*',
+    '/billing/:path*',
     '/login',
   ],
 }

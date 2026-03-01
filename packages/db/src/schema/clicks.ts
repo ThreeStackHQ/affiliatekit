@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, jsonb } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, timestamp, jsonb, boolean } from 'drizzle-orm/pg-core'
 import { affiliates } from './affiliates'
 import { programs } from './programs'
 
@@ -13,6 +13,7 @@ export const clicks = pgTable('clicks', {
   ipAddr: text('ip_addr'),
   userAgent: text('user_agent'),
   referrer: text('referrer'),
+  converted: boolean('converted').notNull().default(false),
   metadata: jsonb('metadata'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })

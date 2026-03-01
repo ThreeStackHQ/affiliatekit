@@ -1,60 +1,112 @@
-import { db, subscriptions } from '@affiliatekit/db'
-import { eq } from 'drizzle-orm'
+import { db } from '@affiliatekit/db'
+import { subscriptions, programs, affiliates } from '@affiliatekit/db'
+import { eq, count } from 'drizzle-orm'
 
-export type AppTier = 'free' | 'indie' | 'pro'
+export type Tier = 'free' | 'indie' | 'pro'
+
+const TIER_LIMITS = {
+  free: {
+    programLimit: 1,
+    affiliateLimit: 10,
+    conversionsPerMonth: 100,
+  },
+  indie: {
+    programLimit: 3,
+    affiliateLimit: 100,
+    conversionsPerMonth: Infinity,
+  },
+  pro: {
+    programLimit: Infinity,
+    affiliateLimit: Infinity,
+    conversionsPerMonth: Infinity,
+  },
+} as const
 
 /**
- * Maps DB subscription tier enum values to application tier names.
- * DB enum: 'free' | 'pro' | 'business'
- * App tiers: 'free' | 'indie' | 'pro'
+ * Get the current tier for a user (checks subscription status)
  */
-function dbTierToAppTier(dbTier: string): AppTier {
-  if (dbTier === 'business') return 'pro'
-  if (dbTier === 'pro') return 'indie'
-  return 'free'
+export async function getUserTier(userId: string): Promise<Tier> {
+  const [sub] = await db
+    .select({
+      tier: subscriptions.tier,
+      status: subscriptions.status,
+      currentPeriodEnd: subscriptions.currentPeriodEnd,
+    })
+    .from(subscriptions)
+    .where(eq(subscriptions.userId, userId))
+    .limit(1)
+
+  if (!sub) return 'free'
+
+  // Verify subscription is active and not expired
+  const isActive =
+    sub.status === 'active' &&
+    (!sub.currentPeriodEnd || sub.currentPeriodEnd > new Date())
+
+  if (!isActive) return 'free'
+
+  return (sub.tier as Tier) ?? 'free'
 }
 
 /**
- * Maps application tier names to DB enum values.
- * Used when writing to the subscriptions table.
+ * Check if user can create another program based on their tier
  */
-export function appTierToDbTier(tier: AppTier): 'free' | 'pro' | 'business' {
-  if (tier === 'pro') return 'business'
-  if (tier === 'indie') return 'pro'
-  return 'free'
-}
+export async function canCreateProgram(userId: string): Promise<{ allowed: boolean; reason?: string }> {
+  const tier = await getUserTier(userId)
+  const limit = TIER_LIMITS[tier].programLimit
 
-export async function getUserTier(userId: string): Promise<AppTier> {
-  try {
-    const rows = await db
-      .select({ tier: subscriptions.tier, status: subscriptions.status })
-      .from(subscriptions)
-      .where(eq(subscriptions.userId, userId))
-      .limit(1)
+  if (limit === Infinity) return { allowed: true }
 
-    const row = rows[0]
-    if (!row) return 'free'
+  const [row] = await db
+    .select({ total: count() })
+    .from(programs)
+    .where(eq(programs.userId, userId))
 
-    const { tier, status } = row
-    // Only honour active/trialing subscriptions
-    if (status !== 'active' && status !== 'trialing') return 'free'
+  const current = row?.total ?? 0
 
-    return dbTierToAppTier(tier)
-  } catch {
-    return 'free'
+  if (current >= limit) {
+    return {
+      allowed: false,
+      reason: `Your ${tier} plan allows up to ${limit} program(s). Upgrade to create more.`,
+    }
   }
+
+  return { allowed: true }
 }
 
-export interface TierLimits {
-  programs: number
-  affiliates: number
-  conversions: number
+/**
+ * Get affiliate limit for a user's tier
+ */
+export function getAffiliateLimit(tier: Tier): number {
+  const limit = TIER_LIMITS[tier].affiliateLimit
+  return limit === Infinity ? -1 : limit // -1 means unlimited
 }
 
-export function getTierLimits(tier: string): TierLimits {
-  if (tier === 'pro')
-    return { programs: Infinity, affiliates: Infinity, conversions: Infinity }
-  if (tier === 'indie')
-    return { programs: 3, affiliates: 100, conversions: Infinity }
-  return { programs: 1, affiliates: 10, conversions: 100 }
+/**
+ * Check if user can add another affiliate to a program
+ */
+export async function canAddAffiliate(
+  userId: string,
+  programId: string
+): Promise<{ allowed: boolean; reason?: string }> {
+  const tier = await getUserTier(userId)
+  const limit = TIER_LIMITS[tier].affiliateLimit
+
+  if (limit === Infinity) return { allowed: true }
+
+  const [row] = await db
+    .select({ total: count() })
+    .from(affiliates)
+    .where(eq(affiliates.programId, programId))
+
+  const current = row?.total ?? 0
+
+  if (current >= limit) {
+    return {
+      allowed: false,
+      reason: `Your ${tier} plan allows up to ${limit} affiliate(s) per program. Upgrade to add more.`,
+    }
+  }
+
+  return { allowed: true }
 }

@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, numeric, pgEnum } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, timestamp, numeric, pgEnum, integer } from 'drizzle-orm/pg-core'
 import { affiliates } from './affiliates'
 import { programs } from './programs'
 
@@ -13,8 +13,15 @@ export const conversions = pgTable('conversions', {
     .notNull()
     .references(() => programs.id, { onDelete: 'cascade' }),
   orderId: text('order_id').notNull(),
-  orderAmount: numeric('order_amount', { precision: 10, scale: 2 }).notNull(),
-  commissionAmount: numeric('commission_amount', { precision: 10, scale: 2 }).notNull(),
+  // Stripe-specific fields
+  stripeCustomerId: text('stripe_customer_id'),
+  stripeChargeId: text('stripe_charge_id'),
+  // Amount in cents
+  amountCents: integer('amount_cents').notNull().default(0),
+  commissionCents: integer('commission_cents').notNull().default(0),
+  // Legacy decimal fields (kept for backward compat)
+  orderAmount: numeric('order_amount', { precision: 10, scale: 2 }).notNull().default('0'),
+  commissionAmount: numeric('commission_amount', { precision: 10, scale: 2 }).notNull().default('0'),
   status: conversionStatusEnum('status').notNull().default('pending'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })

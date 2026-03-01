@@ -1,63 +1,101 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { auth } from '@/lib/auth'
-import { stripe, PLANS } from '@/lib/stripe'
-import { db, subscriptions, users } from '@affiliatekit/db'
+import { z } from 'zod'
+import { requireAuth } from '@/lib/session'
+import { getStripe, PLANS, type PlanKey } from '@/lib/stripe'
+import { db } from '@affiliatekit/db'
+import { subscriptions } from '@affiliatekit/db'
 import { eq } from 'drizzle-orm'
 
-export const dynamic = 'force-dynamic'
+const CheckoutSchema = z.object({
+  plan: z.enum(['indie', 'pro']),
+  // Optional: affiliate ref code to credit if this checkout converts
+  affiliateCode: z.string().max(32).optional(),
+})
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
-  const session = await auth()
+// POST /api/stripe/checkout — create billing checkout session
+export async function POST(req: NextRequest) {
+  const authResult = await requireAuth()
+  if (authResult instanceof NextResponse) return authResult
+  const user = authResult
 
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const body = (await req.json()) as { plan?: string }
-  const planKey = body.plan === 'pro' ? 'pro' : 'indie'
-  const plan = PLANS[planKey]
-
-  const userEmail = session.user.email
-
-  // Look up user in DB to get userId and existing stripeCustomerId
-  const dbUser = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.email, userEmail))
-    .limit(1)
-
-  const foundUser = dbUser[0]
-
-  if (!foundUser) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  const parsed = CheckoutSchema.safeParse(body)
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'Validation error', issues: parsed.error.issues }, { status: 400 })
   }
 
-  const userId = foundUser.id
+  const { plan, affiliateCode } = parsed.data
+  const planConfig = PLANS[plan as PlanKey]
 
-  // Check for existing Stripe customer ID
-  const existingSub = await db
-    .select({ stripeCustomerId: subscriptions.stripeCustomerId })
-    .from(subscriptions)
-    .where(eq(subscriptions.userId, userId))
-    .limit(1)
+  if (!planConfig.priceId) {
+    return NextResponse.json(
+      { error: `Price ID for ${plan} plan is not configured` },
+      { status: 500 }
+    )
+  }
 
-  const customerId = existingSub[0]?.stripeCustomerId ?? undefined
+  // Also check for affiliate code from cookie header if not in body
+  const cookieHeader = req.headers.get('cookie') ?? ''
+  const cookieAffRef =
+    cookieHeader
+      .split(';')
+      .map((c) => c.trim())
+      .find((c) => c.startsWith('aff_ref=') || c.startsWith('ak_ref='))
+      ?.split('=')[1] ?? null
 
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+  const resolvedAffCode = affiliateCode ?? cookieAffRef ?? null
 
-  const checkoutSession = await stripe.checkout.sessions.create({
-    mode: 'subscription',
-    payment_method_types: ['card'],
-    line_items: [{ price: plan.priceId, quantity: 1 }],
-    success_url: `${baseUrl}/dashboard/billing?success=true`,
-    cancel_url: `${baseUrl}/dashboard/billing`,
-    customer: customerId,
-    customer_email: customerId ? undefined : userEmail,
-    metadata: {
-      userId,
-      plan: planKey,
-    },
-  })
+  const stripe = getStripe()
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
 
-  return NextResponse.json({ url: checkoutSession.url })
+  try {
+    // Check for existing Stripe customer ID
+    const [existingSub] = await db
+      .select({ stripeCustomerId: subscriptions.stripeCustomerId })
+      .from(subscriptions)
+      .where(eq(subscriptions.userId, user.id))
+      .limit(1)
+
+    let customerId = existingSub?.stripeCustomerId ?? undefined
+
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: user.email,
+        metadata: { userId: user.id },
+      })
+      customerId = customer.id
+    }
+
+    // Build metadata — include affiliate ref if present for conversion crediting
+    const metadata: Record<string, string> = {
+      userId: user.id,
+      plan,
+    }
+    if (resolvedAffCode) {
+      metadata.ak_ref = resolvedAffCode
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      customer: customerId,
+      payment_method_types: ['card'],
+      mode: 'subscription',
+      line_items: [{ price: planConfig.priceId, quantity: 1 }],
+      success_url: `${appUrl}/dashboard?upgraded=1&plan=${plan}`,
+      cancel_url: `${appUrl}/billing`,
+      // Pass affiliate ref as client_reference_id for webhook lookup
+      ...(resolvedAffCode ? { client_reference_id: resolvedAffCode } : {}),
+      metadata,
+    })
+
+    return NextResponse.json({ url: session.url })
+  } catch (error) {
+    console.error('[POST /api/stripe/checkout]', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }

@@ -1,7 +1,7 @@
 import { pgTable, uuid, text, timestamp, pgEnum } from 'drizzle-orm/pg-core'
 import { users } from './users'
 
-export const tierEnum = pgEnum('subscription_tier', ['free', 'pro', 'business'])
+export const tierEnum = pgEnum('subscription_tier', ['free', 'indie', 'pro'])
 
 export const subscriptions = pgTable('subscriptions', {
   id: uuid('id').primaryKey().defaultRandom(),
