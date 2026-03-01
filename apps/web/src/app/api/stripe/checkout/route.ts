@@ -8,6 +8,8 @@ import { eq } from 'drizzle-orm'
 
 const CheckoutSchema = z.object({
   plan: z.enum(['indie', 'pro']),
+  // Optional: affiliate ref code to credit if this checkout converts
+  affiliateCode: z.string().max(32).optional(),
 })
 
 // POST /api/stripe/checkout — create billing checkout session
@@ -28,7 +30,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Validation error', issues: parsed.error.issues }, { status: 400 })
   }
 
-  const { plan } = parsed.data
+  const { plan, affiliateCode } = parsed.data
   const planConfig = PLANS[plan as PlanKey]
 
   if (!planConfig.priceId) {
@@ -37,6 +39,17 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     )
   }
+
+  // Also check for affiliate code from cookie header if not in body
+  const cookieHeader = req.headers.get('cookie') ?? ''
+  const cookieAffRef =
+    cookieHeader
+      .split(';')
+      .map((c) => c.trim())
+      .find((c) => c.startsWith('aff_ref=') || c.startsWith('ak_ref='))
+      ?.split('=')[1] ?? null
+
+  const resolvedAffCode = affiliateCode ?? cookieAffRef ?? null
 
   const stripe = getStripe()
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
@@ -59,14 +72,25 @@ export async function POST(req: NextRequest) {
       customerId = customer.id
     }
 
+    // Build metadata — include affiliate ref if present for conversion crediting
+    const metadata: Record<string, string> = {
+      userId: user.id,
+      plan,
+    }
+    if (resolvedAffCode) {
+      metadata.ak_ref = resolvedAffCode
+    }
+
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ['card'],
       mode: 'subscription',
       line_items: [{ price: planConfig.priceId, quantity: 1 }],
       success_url: `${appUrl}/dashboard?upgraded=1&plan=${plan}`,
-      cancel_url: `${appUrl}/dashboard/billing`,
-      metadata: { userId: user.id, plan },
+      cancel_url: `${appUrl}/billing`,
+      // Pass affiliate ref as client_reference_id for webhook lookup
+      ...(resolvedAffCode ? { client_reference_id: resolvedAffCode } : {}),
+      metadata,
     })
 
     return NextResponse.json({ url: session.url })
