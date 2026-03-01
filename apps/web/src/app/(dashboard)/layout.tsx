@@ -3,13 +3,14 @@ import { useState } from 'react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { signOut } from 'next-auth/react'
-import { Layers, Users, ArrowRightLeft, DollarSign, Settings, Menu, TrendingUp } from 'lucide-react'
+import { Layers, Users, ArrowRightLeft, DollarSign, Settings, Menu, TrendingUp, CreditCard } from 'lucide-react'
 
 const nav = [
   { href: '/dashboard', label: 'Programs', icon: Layers },
   { href: '/dashboard/affiliates', label: 'Affiliates', icon: Users },
   { href: '/dashboard/conversions', label: 'Conversions', icon: ArrowRightLeft },
   { href: '/dashboard/payouts', label: 'Payouts', icon: DollarSign },
+  { href: '/dashboard/billing', label: 'Billing', icon: CreditCard },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings },
 ]
 
