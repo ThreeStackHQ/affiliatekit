@@ -1,0 +1,30 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Next.js
+.next
+out
+build
+dist
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Turbo
+.turbo
+
+# DB
+*.db
+*.sqlite
+
+# Misc
+.DS_Store
+*.pem
+coverage
+.nyc_output
+
+# Drizzle
+drizzle/meta

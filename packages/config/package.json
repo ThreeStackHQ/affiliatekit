@@ -1,0 +1,6 @@
+{
+  "name": "@affiliatekit/config",
+  "version": "0.1.0",
+  "private": true,
+  "files": ["tsconfig.json", "tsconfig.base.json", "eslint-preset.js"]
+}
