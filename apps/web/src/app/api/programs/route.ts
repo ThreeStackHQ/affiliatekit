@@ -4,6 +4,7 @@ import { db } from '@affiliatekit/db'
 import { programs, affiliates, conversions } from '@affiliatekit/db'
 import { eq, sql } from 'drizzle-orm'
 import { requireAuth } from '@/lib/session'
+import { canCreateProgram } from '@/lib/tier'
 
 const CreateProgramSchema = z.object({
   name: z.string().min(2).max(100),
@@ -62,6 +63,12 @@ export async function POST(req: NextRequest) {
   }
 
   const { name, commissionType, commissionValue, cookieDays } = parsed.data
+
+  // Enforce tier limit
+  const tierCheck = await canCreateProgram(user.id)
+  if (!tierCheck.allowed) {
+    return NextResponse.json({ error: tierCheck.reason ?? 'Program limit reached' }, { status: 403 })
+  }
 
   // Generate a unique slug from the program name
   const baseSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')

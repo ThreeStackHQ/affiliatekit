@@ -5,6 +5,7 @@ import { programs, affiliates, clicks, conversions } from '@affiliatekit/db'
 import { eq, sql, and } from 'drizzle-orm'
 import { requireAuth } from '@/lib/session'
 import { nanoid } from 'nanoid'
+import { canAddAffiliate } from '@/lib/tier'
 
 const AddAffiliateSchema = z.object({
   name: z.string().min(2).max(100),
@@ -86,6 +87,12 @@ export async function POST(
   }
 
   const { name, email } = parsed.data
+
+  // Enforce tier affiliate limit
+  const tierCheck = await canAddAffiliate(user.id, params.id)
+  if (!tierCheck.allowed) {
+    return NextResponse.json({ error: tierCheck.reason ?? 'Affiliate limit reached' }, { status: 403 })
+  }
 
   // Check if affiliate with this email already exists in this program
   const existing = await db

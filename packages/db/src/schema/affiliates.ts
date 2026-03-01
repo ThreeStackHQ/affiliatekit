@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, integer, pgEnum } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, timestamp, integer, pgEnum, numeric } from 'drizzle-orm/pg-core'
 import { programs } from './programs'
 
 export const affiliateStatusEnum = pgEnum('affiliate_status', ['pending', 'active', 'banned'])
@@ -14,6 +14,8 @@ export const affiliates = pgTable('affiliates', {
   status: affiliateStatusEnum('status').notNull().default('pending'),
   totalClicks: integer('total_clicks').notNull().default(0),
   totalConversions: integer('total_conversions').notNull().default(0),
+  earnedBalance: numeric('earned_balance', { precision: 10, scale: 2 }).notNull().default('0'),
+  paidOutBalance: numeric('paid_out_balance', { precision: 10, scale: 2 }).notNull().default('0'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 })
 
